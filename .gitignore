@@ -34,6 +34,19 @@ tsconfig.tsbuildinfo
 ort-wasm-simd-threaded.wasm
 ffmpeg/ffmpeg-core.wasm
 
+# Config files (not interesting for visitors, but needed for dev)
+.eslintrc.cjs
+
+# Lock file (npm regenerates it)
+package-lock.json
+
+# Duplicate assets (served from public/)
+logo.webp
+
+# Static assets in public/ (not interesting to browse)
+public/ffmpeg/
+public/gif.worker.js
+
 # Other
 AGENTS.md
 未命名文件夹/
