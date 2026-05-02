@@ -9,7 +9,7 @@
 
 ## 📸 项目截图
 
-> 🖼️ 截图待补充 — 运行 `npm run dev` 后访问 http://localhost:5173 查看
+![快影创作工具集首页](./docs/screenshot.png)
 
 ## ✨ 特性
 
