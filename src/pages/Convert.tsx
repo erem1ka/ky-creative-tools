@@ -1,24 +1,44 @@
-import React, { useState } from 'react'
-import { downloadBlob, generateFilename, showToast, handlePasteImage, formatSize } from '../lib/utils'
+import { useState, useEffect } from 'react'
+import { downloadBlob, showToast, handlePasteImage, formatSize } from '../lib/utils'
 
-type Format = 'jpeg' | 'png' | 'webp' | 'mp4' | 'webm' | 'gif'
+type Format = 'jpeg' | 'png' | 'webp'
+
+const formats: Format[] = ['jpeg', 'png', 'webp']
+
+const formatExt = (fmt: Format): string => fmt === 'jpeg' ? 'jpg' : fmt
+const formatMime = (fmt: Format): string => {
+  if (fmt === 'jpeg') return 'image/jpeg'
+  if (fmt === 'png') return 'image/png'
+  if (fmt === 'webp') return 'image/webp'
+  return 'application/octet-stream'
+}
+
+interface ConvertItem {
+  id: string
+  file: File
+  status: 'waiting' | 'converting' | 'done' | 'error'
+  resultBlob?: Blob
+  resultUrl?: string
+  error?: string
+}
 
 export default function Convert() {
-  const [files, setFiles] = useState<File[]>([])
-  const [results, setResults] = useState<(Blob | null)[]>([])
+  const [items, setItems] = useState<ConvertItem[]>([])
   const [outputFmt, setOutputFmt] = useState<Format>('jpeg')
-  const [hasVideo, setHasVideo] = useState(false)
-  const [progress, setProgress] = useState(0)
   const [processing, setProcessing] = useState(false)
 
-  const handleFiles = (fileList: FileList | null) => {
-    if (!fileList) return
-    const arr = Array.from(fileList).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'))
-    setFiles(arr)
-    setResults([])
-    setHasVideo(arr.some(f => f.type.startsWith('video/')))
-    setOutputFmt(arr.some(f => f.type.startsWith('video/')) ? 'mp4' : 'jpeg')
-    setProgress(0)
+  const handleFiles = (fileList: FileList | File[]) => {
+    const arr = Array.from(fileList).filter(f => f.type.startsWith('image/'))
+    if (arr.length === 0) {
+      showToast('仅支持图片格式', 'error')
+      return
+    }
+    const newItems: ConvertItem[] = arr.map(f => ({
+      id: `${Date.now()}-${f.name}`,
+      file: f,
+      status: 'waiting',
+    }))
+    setItems(prev => [...prev, ...newItems])
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -26,7 +46,7 @@ export default function Convert() {
     handleFiles(e.dataTransfer.files)
   }
 
-  React.useEffect(() => {
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         e.preventDefault()
@@ -37,176 +57,264 @@ export default function Convert() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const convertAll = async () => {
-    if (files.length === 0) return
-    setProcessing(true)
-    setResults([])
-
-    const newResults: (Blob | null)[] = []
-    for (let i = 0; i < files.length; i++) {
-      setProgress(Math.round((i / files.length) * 100))
-      try {
-        const file = files[i]
-        let blob: Blob
-        if (file.type.startsWith('video/')) {
-          // 视频转换需要 FFmpeg.wasm，这里用简化的 Canvas 方案（仅首帧）
-          blob = await convertVideoPlaceholder(file)
-        } else {
-          blob = await convertImage(file)
+  // Image conversion using Canvas
+  const convertImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.width
+        canvas.height = img.height
+        const ctx = canvas.getContext('2d')!
+        if (outputFmt === 'jpeg') {
+          ctx.fillStyle = '#fff'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
         }
-        newResults.push(blob)
-      } catch {
-        newResults.push(null)
+        ctx.drawImage(img, 0, 0)
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('图片转换失败')), formatMime(outputFmt), 0.92)
+        URL.revokeObjectURL(img.src)
+      }
+      img.onerror = () => reject(new Error('图片加载失败'))
+      img.src = URL.createObjectURL(file)
+    })
+  }
+
+  const startConvert = async () => {
+    if (items.length === 0 || processing) return
+    setProcessing(true)
+
+    for (const item of items) {
+      if (item.status !== 'waiting') continue
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'converting' } : i))
+      try {
+        const blob = await convertImage(item.file)
+        const url = URL.createObjectURL(blob)
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', resultBlob: blob, resultUrl: url } : i))
+      } catch (err: any) {
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error', error: err.message || '转换失败' } : i))
       }
     }
-    setResults(newResults)
-    setProgress(100)
     setProcessing(false)
     showToast('转换完成')
   }
 
-  const convertImage = (file: File): Promise<Blob> => {
-    return new Promise(resolve => {
-      const reader = new FileReader()
-      reader.onload = e => {
-        const img = new Image()
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          canvas.width = img.width
-          canvas.height = img.height
-          const ctx = canvas.getContext('2d')!
-          if (outputFmt === 'jpeg') {
-            ctx.fillStyle = '#fff'
-            ctx.fillRect(0, 0, canvas.width, canvas.height)
-          }
-          ctx.drawImage(img, 0, 0)
-          const mime = outputFmt === 'jpeg' ? 'image/jpeg' : outputFmt === 'webp' ? 'image/webp' : 'image/png'
-          canvas.toBlob(b => resolve(b!), mime, outputFmt === 'png' ? undefined : 0.92)
-        }
-        img.src = e.target.result as string
+  const downloadAll = () => {
+    items.forEach((item, i) => {
+      if (item.resultBlob) {
+        setTimeout(() => downloadBlob(item.resultBlob!, item.file.name.replace(/\.[^.]+$/, '') + '.' + formatExt(outputFmt)), i * 200)
       }
-      reader.readAsDataURL(file)
+    })
+    showToast('开始下载')
+  }
+
+  const removeItem = (id: string) => {
+    setItems(prev => {
+      const item = prev.find(i => i.id === id)
+      if (item?.resultUrl) URL.revokeObjectURL(item.resultUrl)
+      return prev.filter(i => i.id !== id)
     })
   }
 
-  const convertVideoPlaceholder = (file: File): Promise<Blob> => {
-    // 简化版：返回原文件（实际需要 FFmpeg.wasm）
-    return Promise.resolve(file)
+  const clearAll = () => {
+    items.forEach(item => { if (item.resultUrl) URL.revokeObjectURL(item.resultUrl) })
+    setItems([])
   }
 
-  const getExt = (fmt: Format) => fmt === 'jpeg' ? 'jpg' : fmt
-
-  const imageFormats: Format[] = ['jpeg', 'png', 'webp']
-  const videoFormats: Format[] = ['mp4', 'webm', 'gif']
-
   return (
-    <div className="space-y-6">
-      {/* 上传区域 */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* Upload zone */}
       <div
         onDrop={handleDrop}
         onDragOver={e => e.preventDefault()}
-        className="border-2 border-dashed border-[var(--border)] rounded-xl p-10 text-center cursor-pointer hover:border-[var(--accent)] transition bg-[var(--surface2)]"
-        onClick={() => document.getElementById('fileInput')?.click()}
+        onClick={() => document.getElementById('fileInputConv')?.click()}
+        style={{
+          border: '2px dashed rgba(255,255,255,0.08)',
+          borderRadius: '16px',
+          padding: '48px 24px',
+          textAlign: 'center',
+          cursor: 'pointer',
+          background: 'rgba(255,255,255,0.02)',
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
       >
         <input
-          id="fileInput"
+          id="fileInputConv"
           type="file"
-          accept="image/*,video/*"
+          accept="image/*"
           multiple
-          onChange={e => handleFiles(e.target.files)}
-          className="hidden"
+          onChange={e => e.target.files && handleFiles(e.target.files)}
+          style={{ display: 'none' }}
         />
-        <div className="text-3xl mb-3">📂</div>
-        <div className="text-sm font-medium mb-1">点击或拖入图片/视频</div>
-        <div className="text-xs text-[var(--text2)]">图片：JPG/PNG/WebP　视频：MP4/WebM/MOV</div>
+        <div style={{ fontSize: '36px', marginBottom: '12px' }}>📂</div>
+        <div style={{ fontSize: '14px', fontWeight: 500, marginBottom: '8px' }}>点击或拖入图片</div>
+        <div style={{ fontSize: '12px', color: 'var(--text2)' }}>支持 JPG / PNG / WebP / GIF · 可 Ctrl+V 粘贴</div>
       </div>
 
-      {/* 格式选择 */}
-      <div>
-        <div className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3">转换到</div>
-        <div className="flex gap-2 flex-wrap">
-          {(!hasVideo ? imageFormats : videoFormats).map(fmt => (
-            <button
-              key={fmt}
-              onClick={() => setOutputFmt(fmt)}
-              className={`px-4 py-2.5 rounded-lg border font-mono text-sm font-bold transition ${
-                outputFmt === fmt
-                  ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
-                  : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
-              }`}
-            >
-              {fmt.toUpperCase()}
-            </button>
+      {/* Format selector */}
+      {items.length > 0 && (
+        <div>
+          <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text2)', marginBottom: '12px', textTransform: 'uppercase' }}>
+            转换到
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {formats.map(fmt => (
+              <button
+                key={fmt}
+                onClick={() => setOutputFmt(fmt)}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '8px',
+                  border: outputFmt === fmt ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.08)',
+                  background: outputFmt === fmt ? 'rgba(255,76,139,0.1)' : 'rgba(255,255,255,0.05)',
+                  color: outputFmt === fmt ? 'var(--accent)' : 'var(--text2)',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                .{formatExt(fmt).toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {items.length > 0 && (
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={startConvert}
+            disabled={processing || items.every(i => i.status !== 'waiting')}
+            style={{
+              flex: 1,
+              padding: '14px',
+              borderRadius: '12px',
+              background: 'linear-gradient(90deg, var(--accent), var(--accent2))',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: '13px',
+              border: 'none',
+              cursor: processing || items.every(i => i.status !== 'waiting') ? 'not-allowed' : 'pointer',
+              opacity: processing || items.every(i => i.status !== 'waiting') ? 0.5 : 1,
+            }}
+          >
+            {processing ? '转换中...' : '开始转换'}
+          </button>
+          <button
+            onClick={clearAll}
+            style={{
+              padding: '14px 20px',
+              borderRadius: '12px',
+              background: 'rgba(255,255,255,0.05)',
+              color: 'var(--text2)',
+              fontWeight: 600,
+              fontSize: '13px',
+              border: '1px solid rgba(255,255,255,0.08)',
+              cursor: 'pointer',
+            }}
+          >
+            清空
+          </button>
+        </div>
+      )}
+
+      {/* File list */}
+      {items.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {items.map(item => (
+            <div key={item.id} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '12px',
+              borderRadius: '12px',
+              background: 'rgba(255,255,255,0.05)',
+              border: item.status === 'error' ? '1px solid rgba(255,91,91,0.3)' 
+                : item.status === 'done' ? '1px solid rgba(62,207,142,0.3)' 
+                : '1px solid rgba(255,255,255,0.08)',
+            }}>
+              {/* Thumbnail */}
+              <img src={URL.createObjectURL(item.file)} style={{
+                width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover',
+              }} alt="" />
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {item.file.name}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text2)' }}>
+                  {formatSize(item.file.size)} · {item.file.type.split('/')[1].toUpperCase()}
+                  {item.status === 'done' && item.resultBlob && (
+                    <span style={{ color: 'var(--success)', marginLeft: '8px' }}>
+                      → {formatSize(item.resultBlob.size)} .{formatExt(outputFmt).toUpperCase()}
+                    </span>
+                  )}
+                  {item.status === 'error' && (
+                    <span style={{ color: 'var(--danger)', marginLeft: '8px' }}>✗ {item.error}</span>
+                  )}
+                </div>
+              </div>
+              {/* Download button */}
+              {item.status === 'done' && item.resultBlob && (
+                <button
+                  onClick={() => {
+                    downloadBlob(item.resultBlob!, item.file.name.replace(/\.[^.]+$/, '') + '.' + formatExt(outputFmt))
+                    showToast('下载成功')
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    background: 'var(--success)',
+                    color: '#fff',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  下载
+                </button>
+              )}
+              {/* Remove button */}
+              <button
+                onClick={() => removeItem(item.id)}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  background: 'transparent',
+                  color: 'var(--text2)',
+                  fontSize: '14px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
-      </div>
-
-      {/* 开始按钮 */}
-      <button
-        onClick={convertAll}
-        disabled={files.length === 0 || processing}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {processing ? '处理中...' : '开始转换'}
-      </button>
-
-      {/* 进度条 */}
-      {processing && (
-        <div className="space-y-2">
-          <div className="h-1.5 rounded-full bg-[var(--surface2)] overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] transition-all" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="text-xs text-[var(--text2)] text-center">处理中... {progress}%</div>
-        </div>
       )}
 
-      {/* 文件列表 */}
-      {files.length > 0 && (
-        <div className="space-y-2">
-          {files.map((file, i) => {
-            const result = results[i]
-            const isVideo = file.type.startsWith('video/')
-            return (
-              <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface2)] border border-[var(--border)]">
-                {isVideo ? (
-                  <div className="w-10 h-10 rounded bg-black flex items-center justify-center text-lg">🎬</div>
-                ) : (
-                  <img src={URL.createObjectURL(file)} className="w-10 h-10 rounded object-cover" alt="" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold truncate">{file.name}</div>
-                  <div className="text-[10px] text-[var(--text2)]">
-                    {formatSize(file.size)} · {file.type.split('/')[1].toUpperCase()}
-                    {result && <span className="text-[var(--success)] ml-2">→ {formatSize(result.size)}</span>}
-                  </div>
-                </div>
-                {result && (
-                  <button
-                    onClick={() => {
-                      downloadBlob(result, file.name.replace(/\.[^.]+$/, '') + '.' + getExt(outputFmt))
-                      showToast('下载成功')
-                    }}
-                    className="px-3 py-1.5 rounded bg-[var(--success)] text-white text-xs font-semibold"
-                  >
-                    下载
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* 全部下载 */}
-      {results.length > 0 && results.some(r => r !== null) && (
+      {/* Download all */}
+      {items.some(i => i.status === 'done' && i.resultBlob) && (
         <button
-          onClick={() => {
-            results.forEach((r, i) => {
-              if (r) setTimeout(() => downloadBlob(r, files[i].name.replace(/\.[^.]+$/, '') + '.' + getExt(outputFmt)), i * 200)
-            })
-            showToast('开始下载')
+          onClick={downloadAll}
+          style={{
+            width: '100%',
+            padding: '12px',
+            borderRadius: '12px',
+            background: 'var(--success)',
+            color: '#fff',
+            fontWeight: 700,
+            fontSize: '13px',
+            border: 'none',
+            cursor: 'pointer',
           }}
-          className="w-full py-3 rounded-xl bg-[var(--success)] text-white font-bold text-sm"
         >
           ↓ 全部下载
         </button>

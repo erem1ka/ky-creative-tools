@@ -15,7 +15,18 @@ build
 .DS_Store
 Thumbs.db
 
-# Env
+# Env & Secrets
 .env
 .env.local
 .env.production
+"GPT-Image-2-API Key.txt"
+API Key/
+
+# Deploy config (internal)
+.static-site-deploy.json
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# Large binary assets (loaded from public/)
+ort-wasm-simd-threaded.wasm

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { downloadBlob, generateFilename, showToast, handlePasteImage, formatSize } from '../lib/utils'
 
 export default function Compress() {
@@ -7,8 +7,7 @@ export default function Compress() {
   const [quality, setQuality] = useState(0.8)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  const handleFiles = (fileList: FileList | null) => {
-    if (!fileList) return
+  const handleFiles = (fileList: FileList | File[]) => {
     const arr = Array.from(fileList).filter(f => f.type.startsWith('image/'))
     setFiles(arr)
     setResults([])
@@ -19,13 +18,14 @@ export default function Compress() {
     handleFiles(e.dataTransfer.files)
   }
 
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        e.preventDefault()
-        handlePasteImage(f => handleFiles([f]))
-      }
+  const handler = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      e.preventDefault()
+      handlePasteImage(f => handleFiles([f]))
     }
+  }
+
+  useEffect(() => {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
@@ -63,7 +63,7 @@ export default function Compress() {
   const fileToDataUrl = (file: File): Promise<string> => {
     return new Promise(resolve => {
       const r = new FileReader()
-      r.onload = () => resolve(r.result as string)
+      r.onload = (e) => resolve(e.target!.result as string)
       r.readAsDataURL(file)
     })
   }
@@ -72,7 +72,6 @@ export default function Compress() {
     <div className="space-y-6">
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* 上传区域 */}
       <div
         onDrop={handleDrop}
         onDragOver={e => e.preventDefault()}
@@ -84,7 +83,7 @@ export default function Compress() {
           type="file"
           accept="image/*"
           multiple
-          onChange={e => handleFiles(e.target.files)}
+          onChange={e => e.target.files && handleFiles(e.target.files)}
           className="hidden"
         />
         <div className="text-3xl mb-3">📂</div>
@@ -92,7 +91,6 @@ export default function Compress() {
         <div className="text-xs text-[var(--text2)]">支持多选，Ctrl+V 粘贴</div>
       </div>
 
-      {/* 质量滑块 */}
       <div>
         <div className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3">压缩质量</div>
         <div className="flex items-center gap-4">
@@ -109,7 +107,6 @@ export default function Compress() {
         </div>
       </div>
 
-      {/* 操作按钮 */}
       <button
         onClick={compressAll}
         disabled={files.length === 0}
@@ -118,7 +115,6 @@ export default function Compress() {
         开始压缩
       </button>
 
-      {/* 文件列表 */}
       {files.length > 0 && (
         <div className="space-y-2">
           {files.map((file, i) => {
@@ -154,7 +150,6 @@ export default function Compress() {
         </div>
       )}
 
-      {/* 全部下载 */}
       {results.length > 1 && (
         <button
           onClick={() => {

@@ -1,12 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { downloadBlob, generateFilename, showToast, handlePasteImage } from '../lib/utils'
-
-type Ratio = 0 | 1 | 16/9 | 9/16 | 4/3 | 3/4
+import { useState, useRef, useEffect } from 'react'
+import { generateFilename, showToast, handlePasteImage } from '../lib/utils'
 
 export default function Crop() {
   const [imgEl, setImgEl] = useState<HTMLImageElement | null>(null)
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 })
-  const [lockedRatio, setLockedRatio] = useState<Ratio>(0)
+  const [lockedRatio, setLockedRatio] = useState<number>(0)
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, w: 0, h: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
@@ -15,7 +13,7 @@ export default function Crop() {
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  const ratios: { label: string; value: Ratio }[] = [
+  const ratios: { label: string; value: number }[] = [
     { label: '自由', value: 0 },
     { label: '1:1', value: 1 },
     { label: '16:9', value: 16/9 },
@@ -24,21 +22,21 @@ export default function Crop() {
     { label: '3:4', value: 3/4 },
   ]
 
-  const handleFiles = (fileList: FileList | null) => {
+  const handleFiles = (fileList: FileList | File[]) => {
     if (!fileList || !fileList[0]) return
     const file = fileList[0]
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
-    reader.onload = e => {
+    reader.onload = (e) => {
       const img = new Image()
       img.onload = () => {
         setImgEl(img)
         setResultDataUrl(null)
-        const maxW = (wrapRef.current?.parentElement?.clientWidth || 600) - 60
+        const maxW = ((wrapRef.current?.parentElement?.clientWidth || 600) - 60) / 2
         const scale = maxW / img.width
         setCanvasSize({ w: Math.round(img.width * scale), h: Math.round(img.height * scale) })
       }
-      img.src = e.target.result as string
+      img.src = e.target!.result as string
     }
     reader.readAsDataURL(file)
   }
@@ -63,9 +61,11 @@ export default function Crop() {
     if (!imgEl || !canvasRef.current || !overlayRef.current) return
     const src = canvasRef.current
     const ov = overlayRef.current
-    const ctx = src.getContext('2d')!
-    ctx.clearRect(0, 0, src.width, src.height)
-    ctx.drawImage(imgEl, 0, 0, src.width, src.height)
+    src.width = canvasSize.w
+    src.height = canvasSize.h
+    ov.width = canvasSize.w
+    ov.height = canvasSize.h
+    src.getContext('2d')!.drawImage(imgEl, 0, 0, src.width, src.height)
   }, [imgEl, canvasSize])
 
   const drawOverlay = () => {
@@ -82,11 +82,11 @@ export default function Crop() {
 
   useEffect(() => { drawOverlay() }, [cropRect])
 
-  const getPos = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
+  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
     if (!overlayRef.current) return { x: 0, y: 0 }
     const rect = overlayRef.current.getBoundingClientRect()
-    const clientX = 'touches' in e ? e.touches[0]?.clientX || 0 : (e as React.MouseEvent).clientX
-    const clientY = 'touches' in e ? e.touches[0]?.clientY || 0 : (e as React.MouseEvent).clientY
+    const clientX = 'touches' in e ? e.touches[0]?.clientX || 0 : e.clientX
+    const clientY = 'touches' in e ? e.touches[0]?.clientY || 0 : e.clientY
     return { x: clientX - rect.left, y: clientY - rect.top }
   }
 
@@ -132,10 +132,8 @@ export default function Crop() {
     const c = document.createElement('canvas')
     c.width = rw
     c.height = rh
-    const ctx = c.getContext('2d')!
-    ctx.drawImage(imgEl, rx, ry, rw, rh, 0, 0, rw, rh)
-    const dataUrl = c.toDataURL('image/png')
-    setResultDataUrl(dataUrl)
+    c.getContext('2d')!.drawImage(imgEl, rx, ry, rw, rh, 0, 0, rw, rh)
+    setResultDataUrl(c.toDataURL('image/png'))
     showToast('裁剪完成')
   }
 
@@ -156,7 +154,7 @@ export default function Crop() {
         className="border-2 border-dashed border-[var(--border)] rounded-xl p-10 text-center cursor-pointer hover:border-[var(--accent)] transition bg-[var(--surface2)]"
         onClick={() => document.getElementById('fileInput')?.click()}
       >
-        <input id="fileInput" type="file" accept="image/*" onChange={e => handleFiles(e.target.files)} className="hidden" />
+        <input id="fileInput" type="file" accept="image/*" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
         <div className="text-3xl mb-3">✂️</div>
         <div className="text-sm font-medium mb-1">点击或拖入图片</div>
         <div className="text-xs text-[var(--text2)]">Ctrl+V 粘贴</div>
@@ -166,7 +164,6 @@ export default function Crop() {
 
   return (
     <div className="space-y-6">
-      {/* 比例选择 */}
       <div className="flex flex-wrap gap-2 items-center">
         <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mr-2">锁定比例：</span>
         {ratios.map(r => (
@@ -189,14 +186,8 @@ export default function Crop() {
         )}
       </div>
 
-      {/* 画布区域 */}
       <div ref={wrapRef} className="relative inline-block overflow-hidden cursor-crosshair max-w-full">
-        <canvas
-          ref={canvasRef}
-          width={canvasSize.w}
-          height={canvasSize.h}
-          className="rounded-xl max-w-full"
-        />
+        <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} className="rounded-xl max-w-full" />
         <canvas
           ref={overlayRef}
           width={canvasSize.w}
@@ -212,7 +203,6 @@ export default function Crop() {
         />
       </div>
 
-      {/* 操作按钮 */}
       <div className="flex gap-3">
         <button
           onClick={() => { setImgEl(null); setResultDataUrl(null) }}
@@ -229,15 +219,11 @@ export default function Crop() {
         </button>
       </div>
 
-      {/* 结果 */}
       {resultDataUrl && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">裁剪结果</span>
-            <button
-              onClick={downloadResult}
-              className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold"
-            >
+            <button onClick={downloadResult} className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold">
               ↓ 下载
             </button>
           </div>

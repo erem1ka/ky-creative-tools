@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { downloadBlob, generateFilename, showToast, handlePasteImage } from '../lib/utils'
+import { useState, useRef, useEffect } from 'react'
+import { showToast, handlePasteImage } from '../lib/utils'
 
 export default function Palette() {
   const [imgEl, setImgEl] = useState<HTMLImageElement | null>(null)
@@ -7,18 +7,18 @@ export default function Palette() {
   const [colorCount, setColorCount] = useState(5)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  const handleFiles = (fileList: FileList | null) => {
+  const handleFiles = (fileList: FileList | File[]) => {
     if (!fileList || !fileList[0]) return
     const file = fileList[0]
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
-    reader.onload = e => {
+    reader.onload = (e) => {
       const img = new Image()
       img.onload = () => {
         setImgEl(img)
         extractColors(img)
       }
-      img.src = e.target.result as string
+      img.src = e.target!.result as string
     }
     reader.readAsDataURL(file)
   }
@@ -54,18 +54,16 @@ export default function Palette() {
     const imageData = ctx.getImageData(0, 0, size, size).data
     const pixelMap = new Map<string, number>()
 
-    // 采样像素
-    for (let i = 0; i < imageData.length; i += 4 * 4) {
+    for (let i = 0; i < imageData.length; i += 16) {
       const r = Math.round(imageData[i] / 16) * 16
       const g = Math.round(imageData[i + 1] / 16) * 16
       const b = Math.round(imageData[i + 2] / 16) * 16
       const a = imageData[i + 3]
-      if (a < 128) continue // 跳过透明像素
+      if (a < 128) continue
       const key = `${r},${g},${b}`
       pixelMap.set(key, (pixelMap.get(key) || 0) + 1)
     }
 
-    // 排序取前 N 个
     const sorted = [...pixelMap.entries()].sort((a, b) => b[1] - a[1])
     const topColors = sorted.slice(0, colorCount).map(([rgb]) => {
       const [r, g, b] = rgb.split(',').map(Number)
@@ -88,7 +86,7 @@ export default function Palette() {
         className="border-2 border-dashed border-[var(--border)] rounded-xl p-10 text-center cursor-pointer hover:border-[var(--accent)] transition bg-[var(--surface2)]"
         onClick={() => document.getElementById('fileInput')?.click()}
       >
-        <input id="fileInput" type="file" accept="image/*" onChange={e => handleFiles(e.target.files)} className="hidden" />
+        <input id="fileInput" type="file" accept="image/*" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
         <div className="text-3xl mb-3">🎨</div>
         <div className="text-sm font-medium mb-1">点击或拖入图片</div>
         <div className="text-xs text-[var(--text2)]">自动提取主色调</div>
@@ -100,24 +98,14 @@ export default function Palette() {
     <div className="space-y-6">
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* 颜色数量 */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">颜色数量</label>
           <span className="text-xs font-mono text-[var(--text2)]">{colorCount} 种</span>
         </div>
-        <input
-          type="range"
-          min="3"
-          max="12"
-          step="1"
-          value={colorCount}
-          onChange={e => setColorCount(parseInt(e.target.value))}
-          className="w-full accent-[var(--accent)]"
-        />
+        <input type="range" min="3" max="12" step="1" value={colorCount} onChange={e => setColorCount(parseInt(e.target.value))} className="w-full accent-[var(--accent)]" />
       </div>
 
-      {/* 原图预览 */}
       <div className="flex gap-4">
         <img src={imgEl.src} className="w-32 h-32 object-cover rounded-xl" alt="原图" />
         <div className="flex-1">
@@ -140,7 +128,6 @@ export default function Palette() {
         </div>
       </div>
 
-      {/* 色板 */}
       {colors.length > 0 && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">

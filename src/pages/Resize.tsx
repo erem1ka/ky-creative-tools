@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { downloadBlob, generateFilename, showToast, handlePasteImage, formatSize } from '../lib/utils'
+import { useState, useRef, useEffect } from 'react'
+import { generateFilename, showToast, handlePasteImage } from '../lib/utils'
 
 const presets = [
   { label: 'Instagram 正方形', w: 1080, h: 1080 },
@@ -19,12 +19,12 @@ export default function Resize() {
   const [resultDataUrl, setResultDataUrl] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  const handleFiles = (fileList: FileList | null) => {
+  const handleFiles = (fileList: FileList | File[]) => {
     if (!fileList || !fileList[0]) return
     const file = fileList[0]
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
-    reader.onload = e => {
+    reader.onload = (e) => {
       const img = new Image()
       img.onload = () => {
         setImgEl(img)
@@ -33,7 +33,7 @@ export default function Resize() {
         setTargetH(img.height)
         setResultDataUrl(null)
       }
-      img.src = e.target.result as string
+      img.src = e.target!.result as string
     }
     reader.readAsDataURL(file)
   }
@@ -105,7 +105,7 @@ export default function Resize() {
         className="border-2 border-dashed border-[var(--border)] rounded-xl p-10 text-center cursor-pointer hover:border-[var(--accent)] transition bg-[var(--surface2)]"
         onClick={() => document.getElementById('fileInput')?.click()}
       >
-        <input id="fileInput" type="file" accept="image/*" onChange={e => handleFiles(e.target.files)} className="hidden" />
+        <input id="fileInput" type="file" accept="image/*" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
         <div className="text-3xl mb-3">📐</div>
         <div className="text-sm font-medium mb-1">点击或拖入图片</div>
         <div className="text-xs text-[var(--text2)]">Ctrl+V 粘贴</div>
@@ -117,7 +117,6 @@ export default function Resize() {
     <div className="space-y-6">
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* 预设尺寸 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3 block">预设尺寸</label>
         <div className="grid grid-cols-2 gap-2">
@@ -134,7 +133,6 @@ export default function Resize() {
         </div>
       </div>
 
-      {/* 自定义尺寸 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3 block">自定义尺寸</label>
         <div className="flex items-center gap-3">
@@ -150,9 +148,7 @@ export default function Resize() {
           <button
             onClick={() => setLockRatio(!lockRatio)}
             className={`px-3 py-2 rounded-lg border text-sm transition ${
-              lockRatio
-                ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
-                : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'
+              lockRatio ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'
             }`}
             title="锁定比例"
           >
@@ -173,26 +169,14 @@ export default function Resize() {
         </div>
       </div>
 
-      {/* 操作按钮 */}
-      <button
-        onClick={doResize}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-sm"
-      >
-        调整尺寸
-      </button>
+      <button onClick={doResize} className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-sm">调整尺寸</button>
 
-      {/* 结果 */}
       {resultDataUrl && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">结果</span>
             <span className="text-xs font-mono text-[var(--text2)]">{targetW} × {targetH} px</span>
-            <button
-              onClick={downloadResult}
-              className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold"
-            >
-              ↓ 下载
-            </button>
+            <button onClick={downloadResult} className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold">↓ 下载</button>
           </div>
           <img src={resultDataUrl} className="max-w-full max-h-80 rounded-xl mx-auto" alt="结果" />
         </div>

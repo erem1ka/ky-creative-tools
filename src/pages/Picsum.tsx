@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { downloadBlob, generateFilename, showToast } from '../lib/utils'
 
 const sizes = [
@@ -19,8 +19,7 @@ export default function Picsum() {
     const sizeParam = `${selectedSize.w}x${selectedSize.h}`
     const seedParam = seed ? `?seed=${seed}` : ''
     const url = `https://picsum.photos/${sizeParam}${seedParam}`
-    
-    // 预加载
+
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
@@ -48,7 +47,6 @@ export default function Picsum() {
 
   return (
     <div className="space-y-6">
-      {/* 尺寸选择 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3 block">尺寸</label>
         <div className="grid grid-cols-2 gap-2">
@@ -69,7 +67,6 @@ export default function Picsum() {
         </div>
       </div>
 
-      {/* Seed 输入 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">
           Seed（可选，留空随机）
@@ -83,7 +80,6 @@ export default function Picsum() {
         />
       </div>
 
-      {/* 生成按钮 */}
       <button
         onClick={generate}
         disabled={loading}
@@ -92,15 +88,11 @@ export default function Picsum() {
         {loading ? '生成中...' : '生成图片'}
       </button>
 
-      {/* 结果 */}
       {imageUrl && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">生成结果</span>
-            <button
-              onClick={downloadImage}
-              className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold"
-            >
+            <button onClick={downloadImage} className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold">
               ↓ 下载
             </button>
           </div>

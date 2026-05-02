@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { downloadBlob, generateFilename, showToast } from '../lib/utils'
 
 const styles = [
@@ -33,7 +33,7 @@ export default function Avatar() {
     const seedParam = encodeURIComponent(seed.trim())
     const bgParam = backgroundColor === 'random' ? '' : `&backgroundColor=${backgroundColor}`
     const url = `https://api.dicebear.com/9.x/${selectedStyle.id}/svg?seed=${seedParam}${bgParam}`
-    
+
     setImageUrl(url)
     setLoading(false)
   }
@@ -52,7 +52,6 @@ export default function Avatar() {
 
   return (
     <div className="space-y-6">
-      {/* 风格选择 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-3 block">风格</label>
         <div className="grid grid-cols-2 gap-2">
@@ -73,7 +72,6 @@ export default function Avatar() {
         </div>
       </div>
 
-      {/* Seed 输入 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">
           种子文字
@@ -90,7 +88,6 @@ export default function Avatar() {
         </div>
       </div>
 
-      {/* 背景色 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">背景色</label>
         <div className="flex flex-wrap gap-2">
@@ -102,7 +99,7 @@ export default function Avatar() {
                 backgroundColor === c.value ? 'border-[var(--accent)] scale-110' : 'border-transparent'
               }`}
               style={{
-                backgroundColor: c.value === 'transparent' ? '#333' : c.value === 'random' ? 'linear-gradient(135deg, #ff6b6b, #4ecdc4, #45b7d1)' : c.value,
+                backgroundColor: c.value === 'transparent' ? '#333' : c.value === 'random' ? '#333' : c.value,
                 backgroundImage: c.value === 'random' ? 'linear-gradient(135deg, #ff6b6b, #4ecdc4, #45b7d1)' : undefined,
               }}
               title={c.label}
@@ -111,7 +108,6 @@ export default function Avatar() {
         </div>
       </div>
 
-      {/* 生成按钮 */}
       <button
         onClick={generate}
         disabled={loading}
@@ -120,24 +116,16 @@ export default function Avatar() {
         生成头像
       </button>
 
-      {/* 结果 */}
       {imageUrl && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">生成结果</span>
-            <button
-              onClick={downloadImage}
-              className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold"
-            >
+            <button onClick={downloadImage} className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold">
               ↓ 下载
             </button>
           </div>
           <div className="flex items-center justify-center py-8">
-            <img
-              src={imageUrl}
-              className="w-40 h-40 rounded-full border-4 border-[var(--border)]"
-              alt="生成的头像"
-            />
+            <img src={imageUrl} className="w-40 h-40 rounded-full border-4 border-[var(--border)]" alt="生成的头像" />
           </div>
         </div>
       )}

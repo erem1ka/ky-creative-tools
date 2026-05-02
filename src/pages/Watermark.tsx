@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { downloadBlob, generateFilename, showToast, handlePasteImage, formatSize } from '../lib/utils'
+import { useState, useRef, useEffect } from 'react'
+import { generateFilename, showToast, handlePasteImage } from '../lib/utils'
 
 export default function Watermark() {
   const [imgEl, setImgEl] = useState<HTMLImageElement | null>(null)
@@ -13,21 +13,21 @@ export default function Watermark() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  const handleFiles = (fileList: FileList | null) => {
+  const handleFiles = (fileList: FileList | File[]) => {
     if (!fileList || !fileList[0]) return
     const file = fileList[0]
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
-    reader.onload = e => {
+    reader.onload = (e) => {
       const img = new Image()
       img.onload = () => {
         setImgEl(img)
         setResultDataUrl(null)
-        const maxW = (wrapRef.current?.parentElement?.clientWidth || 600) - 60
+        const maxW = ((wrapRef.current?.parentElement?.clientWidth || 600) - 60) / 2
         const scale = maxW / img.width
         setCanvasSize({ w: Math.round(img.width * scale), h: Math.round(img.height * scale) })
       }
-      img.src = e.target.result as string
+      img.src = e.target!.result as string
     }
     reader.readAsDataURL(file)
   }
@@ -57,7 +57,6 @@ export default function Watermark() {
     ctx.clearRect(0, 0, c.width, c.height)
     ctx.drawImage(imgEl, 0, 0, c.width, c.height)
 
-    // 绘制水印
     ctx.globalAlpha = opacity
     ctx.fillStyle = color
     ctx.font = `${fontSize}px 'Noto Sans SC', sans-serif`
@@ -119,7 +118,7 @@ export default function Watermark() {
         className="border-2 border-dashed border-[var(--border)] rounded-xl p-10 text-center cursor-pointer hover:border-[var(--accent)] transition bg-[var(--surface2)]"
         onClick={() => document.getElementById('fileInput')?.click()}
       >
-        <input id="fileInput" type="file" accept="image/*" onChange={e => handleFiles(e.target.files)} className="hidden" />
+        <input id="fileInput" type="file" accept="image/*" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
         <div className="text-3xl mb-3">💧</div>
         <div className="text-sm font-medium mb-1">点击或拖入图片</div>
         <div className="text-xs text-[var(--text2)]">Ctrl+V 粘贴</div>
@@ -129,7 +128,6 @@ export default function Watermark() {
 
   return (
     <div className="space-y-6">
-      {/* 水印文字 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">水印文字</label>
         <input
@@ -141,7 +139,6 @@ export default function Watermark() {
         />
       </div>
 
-      {/* 位置选择 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">位置</label>
         <div className="grid grid-cols-3 gap-2">
@@ -161,95 +158,46 @@ export default function Watermark() {
         </div>
       </div>
 
-      {/* 透明度 */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">透明度</label>
           <span className="text-xs font-mono text-[var(--text2)]">{Math.round(opacity * 100)}%</span>
         </div>
-        <input
-          type="range"
-          min="0.1"
-          max="1"
-          step="0.05"
-          value={opacity}
-          onChange={e => setOpacity(parseFloat(e.target.value))}
-          className="w-full accent-[var(--accent)]"
-        />
+        <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={e => setOpacity(parseFloat(e.target.value))} className="w-full accent-[var(--accent)]" />
       </div>
 
-      {/* 字体大小 */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">字体大小</label>
           <span className="text-xs font-mono text-[var(--text2)]">{fontSize}px</span>
         </div>
-        <input
-          type="range"
-          min="12"
-          max="72"
-          step="2"
-          value={fontSize}
-          onChange={e => setFontSize(parseInt(e.target.value))}
-          className="w-full accent-[var(--accent)]"
-        />
+        <input type="range" min="12" max="72" step="2" value={fontSize} onChange={e => setFontSize(parseInt(e.target.value))} className="w-full accent-[var(--accent)]" />
       </div>
 
-      {/* 颜色 */}
       <div>
         <label className="text-xs font-bold uppercase tracking-wider text-[var(--text2)] mb-2 block">颜色</label>
         <div className="flex gap-2">
           {['#ffffff', '#000000', '#ff0000', '#4f8ef7', '#7c5cfc'].map(c => (
-            <button
-              key={c}
-              onClick={() => setColor(c)}
-              className={`w-8 h-8 rounded-lg border-2 transition ${
-                color === c ? 'border-[var(--accent)]' : 'border-transparent'
-              }`}
-              style={{ backgroundColor: c }}
-            />
+            <button key={c} onClick={() => setColor(c)} className={`w-8 h-8 rounded-lg border-2 transition ${color === c ? 'border-[var(--accent)]' : 'border-transparent'}`} style={{ backgroundColor: c }} />
           ))}
-          <input
-            type="color"
-            value={color}
-            onChange={e => setColor(e.target.value)}
-            className="w-8 h-8 rounded-lg border-0 cursor-pointer"
-          />
+          <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-8 h-8 rounded-lg border-0 cursor-pointer" />
         </div>
       </div>
 
-      {/* 画布预览 */}
       <div ref={wrapRef} className="relative inline-block max-w-full">
         <canvas ref={canvasRef} className="rounded-xl max-w-full" />
       </div>
 
-      {/* 操作按钮 */}
       <div className="flex gap-3">
-        <button
-          onClick={() => { setImgEl(null); setResultDataUrl(null) }}
-          className="px-5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--text)] transition text-sm font-medium"
-        >
-          重新上传
-        </button>
-        <button
-          onClick={applyWatermark}
-          className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-sm"
-        >
-          应用水印
-        </button>
+        <button onClick={() => { setImgEl(null); setResultDataUrl(null) }} className="px-5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--text)] transition text-sm font-medium">重新上传</button>
+        <button onClick={applyWatermark} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-sm">应用水印</button>
       </div>
 
-      {/* 结果 */}
       {resultDataUrl && (
         <div className="border-t border-[var(--border)] pt-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[var(--text2)]">结果</span>
-            <button
-              onClick={downloadResult}
-              className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold"
-            >
-              ↓ 下载
-            </button>
+            <button onClick={downloadResult} className="px-4 py-2 rounded-lg bg-[var(--success)] text-white text-xs font-semibold">↓ 下载</button>
           </div>
           <img src={resultDataUrl} className="max-w-full max-h-80 rounded-xl mx-auto" alt="结果" />
         </div>
