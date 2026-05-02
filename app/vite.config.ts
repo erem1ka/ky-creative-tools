@@ -84,7 +84,7 @@ function imageProxyPlugin(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [react(), excludeWasmAssets(), imageProxyPlugin()],
+  plugins: [react(), excludeWasmAssets()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

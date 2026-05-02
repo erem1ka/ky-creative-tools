@@ -13,7 +13,6 @@ import Outpaint from './pages/Outpaint'
 import ToWebp from './pages/ToWebp'
 import VideoDownload from './pages/VideoDownload'
 import WatermarkRemover from './pages/WatermarkRemover'
-import GPTImage from './pages/GPTImage'
 import './index.css'
 
 // 快影 Logo
@@ -23,7 +22,7 @@ const KwaiYingLogo = () => (
 
 // ===== 默认工具数据 =====
 const defaultTools = [
-  { path: '/gpt-image', icon: '✦', name: 'AI 生图', desc: 'GPT-Image-2 文生图，支持选择尺寸和数量', category: 'ai' },
+
   { path: '/outpaint', icon: '📐', name: '比例修改', desc: 'AI 智能修改图片比例，扩展背景区域（暂无额度，暂不可用）', category: 'ai' },
   { path: '/video', icon: '🎬', name: '视频创作', desc: '文生视频、图生视频、AI 脚本、图片生成（暂无额度，暂不可用）', category: 'ai' },
   { path: '/to-webp', icon: '🎞️', name: '视频转动图', desc: '视频转 WebP/GIF 动图，230×230 默认，浏览器本地处理', category: 'ai' },
@@ -546,7 +545,7 @@ export default function App() {
         <Route path="/resize" element={<ToolLayout title="📐 尺寸调整" desc="精确调整宽高，支持预设尺寸"><Resize /></ToolLayout>} />
         <Route path="/palette" element={<ToolLayout title="🎨 颜色提取" desc="自动提取图片主色调，生成调色板"><Palette /></ToolLayout>} />
         <Route path="/picsum" element={<ToolLayout title="🌄 占位图生成" desc="Lorem Picsum 高质量随机风景照"><Picsum /></ToolLayout>} />
-        <Route path="/gpt-image" element={<ToolLayout title="✦ AI 生图" desc="GPT-Image-2 文生图，支持选择尺寸和数量"><GPTImage /></ToolLayout>} />
+
         <Route path="/avatar" element={<ToolLayout title="👤 头像生成" desc="DiceBear 多种风格头像"><Avatar /></ToolLayout>} />
       </Routes>
     </BrowserRouter>

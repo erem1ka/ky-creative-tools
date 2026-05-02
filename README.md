@@ -16,7 +16,8 @@
 - 🔒 本地处理 — 图片/视频全部在浏览器端完成，不上传服务器
 - 🚀 Vite + React + TypeScript — 快速开发，类型安全
 - 🎨 深色主题 — 统一的设计语言与交互体验
-- 🤖 AI 生图 — GPT-Image-2 文生图 / 图生图（开发模式）
+- 🤖 AI 生图 — GPT-Image-2 文生图 / 图生图
+- 🖼 AI 图片生成 — Seedream 5.0 文生图
 - 🎬 视频创作 — 文生视频、图生视频（Seedance）
 - 📐 比例修改 — AI 智能扩展图片背景（Outpaint）
 - 🧹 去水印 — ONNX 模型本地修复水印区域
@@ -95,6 +96,7 @@ npx -y @codeflicker/frontend-cloud-cli@latest deploy
 - [x] 视频下载（抖音/快手/B站等）
 - [x] AI 比例修改（Outpaint）
 - [x] AI 视频创作（Seedance）
+- [x] AI 图片生成（Seedream）
 - [x] AI 生图（GPT-Image-2）
 - [ ] 批量处理优化
 - [ ] 更多 AI 模型接入
