@@ -48,7 +48,7 @@
 
 ```bash
 git clone https://github.com/erem1ka/ky-creative-tools.git
-cd ky-creative-tools
+cd ky-creative-tools/app
 ```
 
 2. 安装依赖
@@ -68,6 +68,7 @@ npm run dev
 ## 📦 构建打包
 
 ```bash
+cd app
 npm run build
 ```
 
@@ -78,7 +79,7 @@ npm run build
 - **线上地址**：`https://image-tools.frontend-cloud.corp.kuaishou.com`
 
 ```bash
-# 构建
+cd app
 npm run build
 
 # 部署到快手 frontend-cloud
