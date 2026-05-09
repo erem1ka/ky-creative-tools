@@ -119,7 +119,8 @@ function ZoneToolGrid({ zones, onZonesChange }: {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         for (const [, el] of itemRefs.current.entries()) {
-          el.style.transition = 'transform 0.35s cubic-bezier(0.2, 0, 0, 1)'
+          el.style.transition = 'transform 0.55s cubic-bezier(0.25, 0.1, 0.25, 1)'
+          el.style.transform = 'translate(0, 0)'
           el.style.transform = 'translate(0, 0)'
           el.style.zIndex = ''
         }
@@ -130,7 +131,7 @@ function ZoneToolGrid({ zones, onZonesChange }: {
             el.style.transform = ''
             el.style.zIndex = ''
           }
-        }, 380)
+        }, 600)
       })
     })
   }, [])
