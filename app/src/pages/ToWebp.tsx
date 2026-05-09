@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { loadFfmpeg, isFfmpegLoaded } from '../lib/ffmpeg-loader'
 import { showToast, downloadBlob, formatSize } from '../lib/utils'
+import VideoTrimTrack from '../components/VideoTrimTrack'
 
 type OutputFmt = 'webp' | 'gif'
 type PresetSize = '230x230' | 'original' | '80%' | '50%' | 'custom'
@@ -14,6 +15,10 @@ interface ConvertItem {
   resultBlob?: Blob
   resultUrl?: string
   error?: string
+  duration: number      // video total duration in seconds
+  thumbnails: string[]  // thumbnail image URLs
+  trimStart: number     // trim start in seconds (0 = from beginning)
+  trimEnd: number       // trim end in seconds (-1 = to end)
 }
 
 const SPEED_OPTIONS: SpeedPreset[] = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']
@@ -24,6 +29,82 @@ const PRESET_SIZES: { key: PresetSize; label: string }[] = [
   { key: '50%', label: '50%' },
   { key: 'custom', label: '自定义' },
 ]
+
+// Format seconds to HH:MM:SS.mmm for ffmpeg
+const formatFfmpegTime = (sec: number): string => {
+  if (sec <= 0) return '00:00:00.000'
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const wholeS = Math.floor(s)
+  const ms = Math.round((s - wholeS) * 1000)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(wholeS).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
+}
+
+// Generate thumbnails from video file
+const generateThumbnails = async (file: File, duration: number): Promise<string[]> => {
+  const THUMB_COUNT = 10
+  const THUMB_HEIGHT = 44
+  const urls: string[] = []
+
+  const videoUrl = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.preload = 'auto'
+  video.muted = true
+  video.src = videoUrl
+
+  // Wait for video to be ready
+  await new Promise<void>((resolve, reject) => {
+    video.onloadeddata = () => resolve()
+    video.onerror = () => reject(new Error('Video load failed'))
+    setTimeout(() => resolve(), 5000) // timeout fallback
+  })
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')!
+  // Calculate width to maintain aspect ratio
+  const aspectRatio = video.videoWidth / video.videoHeight
+  const thumbWidth = Math.round(THUMB_HEIGHT * aspectRatio)
+  canvas.width = thumbWidth
+  canvas.height = THUMB_HEIGHT
+
+  for (let i = 0; i < THUMB_COUNT; i++) {
+    const time = (duration * i) / THUMB_COUNT + (duration / THUMB_COUNT) / 2
+    // Seek to time
+    video.currentTime = Math.min(time, duration - 0.1)
+    await new Promise<void>((resolve) => {
+      video.onseeked = () => resolve()
+      setTimeout(() => resolve(), 300) // timeout fallback
+    })
+    ctx.drawImage(video, 0, 0, thumbWidth, THUMB_HEIGHT)
+    urls.push(canvas.toDataURL('image/webp', 0.4))
+  }
+
+  URL.revokeObjectURL(videoUrl)
+  return urls
+}
+
+// Get video metadata (duration, dimensions)
+const getVideoMeta = async (file: File): Promise<{ duration: number; width: number; height: number }> => {
+  const url = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.preload = 'metadata'
+  video.src = url
+
+  await new Promise<void>((resolve) => {
+    video.onloadedmetadata = () => resolve()
+    video.onerror = () => resolve()
+    setTimeout(() => resolve(), 3000)
+  })
+
+  const result = {
+    duration: video.duration || 0,
+    width: video.videoWidth || 230,
+    height: video.videoHeight || 230,
+  }
+  URL.revokeObjectURL(url)
+  return result
+}
 
 export default function ToWebp() {
   const [ffmpegLoaded, setFfmpegLoaded] = useState(isFfmpegLoaded())
@@ -37,8 +118,6 @@ export default function ToWebp() {
   const [fps, setFps] = useState(14)
   const [quality, setQuality] = useState(75)
   const [speed, setSpeed] = useState<SpeedPreset>('ultrafast')
-  const [trimStart, setTrimStart] = useState('')
-  const [trimEnd, setTrimEnd] = useState('')
   const [showOptions, setShowOptions] = useState(false)
 
   const [items, setItems] = useState<ConvertItem[]>([])
@@ -56,7 +135,6 @@ export default function ToWebp() {
       const { ffmpeg, loaded } = await loadFfmpeg()
       if (loaded) {
         ffmpegRef.current = ffmpeg
-        // Register progress handler for this page
         ffmpeg.on('progress', ({ progress }) => {
           setItems(prev => prev.map(item => {
             if (item.status === 'converting') {
@@ -66,7 +144,10 @@ export default function ToWebp() {
           }))
         })
         setFfmpegLoaded(true)
-        showToast('FFmpeg 加载完成，可以开始转换')
+        // 仅首次加载（非缓存恢复）时提示
+        if (!isFfmpegLoaded()) {
+          showToast('FFmpeg 加载完成，可以开始转换')
+        }
       } else {
         showToast('FFmpeg 加载失败', 'error')
       }
@@ -77,7 +158,14 @@ export default function ToWebp() {
     setLoadingFfmpeg(false)
   }
 
-  const handleFiles = (fileList: FileList | File[]) => {
+  // Update a specific item's trim range
+  const handleTrimChange = useCallback((id: string, start: number, end: number) => {
+    setItems(prev => prev.map(item =>
+      item.id === id ? { ...item, trimStart: start, trimEnd: end } : item
+    ))
+  }, [])
+
+  const handleFiles = async (fileList: FileList | File[]) => {
     const videoTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/x-flv', 'video/3gpp', 'video/mp2t', 'video/ogg']
     const arr = Array.from(fileList).filter(f =>
       f.type.startsWith('video/') || videoTypes.some(t => f.type === t) || f.name.match(/\.(mp4|webm|mov|avi|mkv|flv|3gp|ts|ogv|m4v)$/i)
@@ -86,13 +174,47 @@ export default function ToWebp() {
       showToast('请选择视频文件', 'error')
       return
     }
+
+    // Create items with loading status first
     const newItems: ConvertItem[] = arr.map(f => ({
       id: `${Date.now()}-${f.name}`,
       file: f,
-      status: 'waiting',
+      status: 'loading' as const,
       progress: 0,
+      duration: 0,
+      thumbnails: [],
+      trimStart: 0,
+      trimEnd: -1,
     }))
     setItems(prev => [...prev, ...newItems])
+
+    // Load metadata and thumbnails for each file asynchronously
+    for (const newItem of newItems) {
+      try {
+        const meta = await getVideoMeta(newItem.file)
+        const thumbs = await generateThumbnails(newItem.file, meta.duration)
+
+        setItems(prev => prev.map(item =>
+          item.id === newItem.id
+            ? {
+                ...item,
+                status: 'waiting',
+                duration: meta.duration,
+                thumbnails: thumbs,
+                trimStart: 0,
+                trimEnd: meta.duration,
+              }
+            : item
+        ))
+      } catch (err: any) {
+        console.error('Video meta load error:', err)
+        setItems(prev => prev.map(item =>
+          item.id === newItem.id
+            ? { ...item, status: 'error', error: '视频信息加载失败' }
+            : item
+        ))
+      }
+    }
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -107,17 +229,9 @@ export default function ToWebp() {
     if (presetSize === '230x230') return { w: 230, h: 230 }
     if (presetSize === 'custom') return { w: customW, h: customH }
 
-    // Get original dimensions via video element
-    const url = URL.createObjectURL(inputFile)
-    const video = document.createElement('video')
-    video.src = url
-    await new Promise<void>(resolve => {
-      video.onloadedmetadata = () => resolve()
-      video.onerror = () => resolve()
-    })
-    const origW = video.videoWidth || 230
-    const origH = video.videoHeight || 230
-    URL.revokeObjectURL(url)
+    const meta = await getVideoMeta(inputFile)
+    const origW = meta.width
+    const origH = meta.height
 
     if (presetSize === 'original') return { w: origW, h: origH }
 
@@ -140,79 +254,75 @@ export default function ToWebp() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'converting', progress: 0 } : i))
 
     try {
-      // Write input file - read as ArrayBuffer for reliability
       const fileData = await item.file.arrayBuffer()
       await ffmpeg.writeFile(inputName, new Uint8Array(fileData))
-      console.log('[ToWebp] Written input file:', inputName, 'size:', item.file.size, 'arrayBuffer size:', fileData.byteLength)
 
-      // Get output dimensions
       const dims = await getOutputDims(item.file)
       const scaleFilter = `scale=${dims.w}:${dims.h}:force_original_aspect_ratio=decrease,pad=${dims.w}:${dims.h}:(ow-iw)/2:(oh-ih)/2:color=white`
 
-      // Build ffmpeg args based on output format
+      // Determine trim parameters from item
+      const effectiveStart = item.trimStart > 0 ? item.trimStart : 0
+      const effectiveEnd = item.trimEnd > 0 && item.trimEnd < item.duration ? item.trimEnd : item.duration
+      const isTrimmed = effectiveStart > 0.1 || effectiveEnd < item.duration - 0.1
+
       let exitCode: number
-      
+
       if (outputFmt === 'webp') {
-        // WebP: single step
         const args: string[] = []
-        if (trimStart) args.push('-ss', trimStart)
-        if (trimEnd) args.push('-to', trimEnd)
+        if (isTrimmed) {
+          args.push('-ss', formatFfmpegTime(effectiveStart))
+          args.push('-to', formatFfmpegTime(effectiveEnd))
+        }
         args.push('-i', inputName)
         args.push('-vf', `fps=${fps},${scaleFilter}`)
-        args.push('-c:v', 'libwebp', '-lossless', '0', '-compression_level', '4',
-          '-q:v', String(quality), '-loop', '0', '-an')
+        args.push('-c:v', 'libwebp', '-lossless', '0', '-compression_level', '6',
+          '-preset', 'photo', '-q:v', String(quality), '-g', String(fps * 3), '-loop', '0', '-an')
         args.push('-y', outputName)
-        console.log('[ToWebp] WebP args:', args.join(' '))
         exitCode = await ffmpeg.exec(args)
       } else {
-        // GIF: two-step palettegen/paletteuse
         const paletteName = `palette_${item.id}.png`
-        
+
         // Step 1: Generate palette
         const paletteArgs: string[] = []
-        if (trimStart) paletteArgs.push('-ss', trimStart)
-        if (trimEnd) paletteArgs.push('-to', trimEnd)
+        if (isTrimmed) {
+          paletteArgs.push('-ss', formatFfmpegTime(effectiveStart))
+          paletteArgs.push('-to', formatFfmpegTime(effectiveEnd))
+        }
         paletteArgs.push('-i', inputName)
         paletteArgs.push('-vf', `fps=${fps},${scaleFilter},palettegen`)
         paletteArgs.push('-y', paletteName)
-        console.log('[ToWebp] GIF palette args:', paletteArgs.join(' '))
         exitCode = await ffmpeg.exec(paletteArgs)
-        console.log('[ToWebp] Palette exit code:', exitCode)
-        
+
         if (exitCode !== 0) {
           throw new Error(`生成调色板失败（exitCode=${exitCode})`)
         }
 
         // Step 2: Generate GIF using palette
         const gifArgs: string[] = []
-        if (trimStart) gifArgs.push('-ss', trimStart)
-        if (trimEnd) gifArgs.push('-to', trimEnd)
+        if (isTrimmed) {
+          gifArgs.push('-ss', formatFfmpegTime(effectiveStart))
+          gifArgs.push('-to', formatFfmpegTime(effectiveEnd))
+        }
         gifArgs.push('-i', inputName, '-i', paletteName)
         gifArgs.push('-filter_complex', `[0:v]fps=${fps},${scaleFilter}[x];[x][1:v]paletteuse`)
         gifArgs.push('-loop', '0', '-an')
         gifArgs.push('-y', outputName)
-        console.log('[ToWebp] GIF args:', gifArgs.join(' '))
         exitCode = await ffmpeg.exec(gifArgs)
 
-        // Clean palette
         try { await ffmpeg.deleteFile(paletteName) } catch {}
       }
-      console.log('[ToWebp] ffmpeg final exit code:', exitCode)
 
       // Read output
       const data = await ffmpeg.readFile(outputName) as Uint8Array
-      console.log('[ToWebp] readFile result type:', typeof data, 'constructor:', data?.constructor?.name, 'length:', data?.length, 'byteLength:', data?.byteLength)
-      
+
       if (!data || data.length === 0) {
         throw new Error(`输出文件为空（0 bytes），exitCode=${exitCode}`)
       }
-      
+
       const mime = outputFmt === 'webp' ? 'image/webp' : 'image/gif'
-      // Create blob from Uint8Array data
       const uint8 = new Uint8Array(data.length)
       uint8.set(data)
       const blob = new Blob([uint8], { type: mime })
-      console.log('[ToWebp] blob size:', blob.size, 'type:', blob.type)
       const resultUrl = URL.createObjectURL(blob)
 
       // Clean up
@@ -264,6 +374,14 @@ export default function ToWebp() {
 
   const clearAll = () => {
     setItems([])
+  }
+
+  // Format seconds for display (MM:SS)
+  const formatDisplayTime = (sec: number): string => {
+    if (sec <= 0) return '0:00'
+    const m = Math.floor(sec / 60)
+    const s = Math.floor(sec % 60)
+    return `${m}:${String(s).padStart(2, '0')}`
   }
 
   return (
@@ -329,13 +447,13 @@ export default function ToWebp() {
             background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)',
             cursor: 'pointer', fontWeight: 600,
           }}>
-            {showOptions ? '收起选项' : '⚙ 选项'} 
-            {presetSize !== '230x230' || fps !== 14 || quality !== 75 || speed !== 'ultrafast' || trimStart || trimEnd
+            {showOptions ? '收起选项' : '⚙ 选项'}
+            {presetSize !== '230x230' || fps !== 14 || quality !== 75 || speed !== 'ultrafast'
               ? ' (已修改)' : ''}
           </button>
         </div>
 
-        {/* Options panel */}
+        {/* Options panel (no trim fields anymore, moved to per-item trim track) */}
         {showOptions && (
           <div style={{
             padding: '20px', borderRadius: '14px', border: '1px solid var(--border)',
@@ -402,25 +520,10 @@ export default function ToWebp() {
               </div>
             </ParamRow>
 
-            {/* Trim */}
-            <ParamRow label="剪辑时间">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input type="text" value={trimStart} onChange={e => setTrimStart(e.target.value)} placeholder="00:00:00"
-                  style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text)', fontSize: '11px', textAlign: 'center' }} />
-                <span style={{ fontSize: '11px', color: 'var(--text2)' }}>~</span>
-                <input type="text" value={trimEnd} onChange={e => setTrimEnd(e.target.value)} placeholder="00:00:00"
-                  style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text)', fontSize: '11px', textAlign: 'center' }} />
-                <button onClick={() => { setTrimStart(''); setTrimEnd('') }} style={{
-                  padding: '4px 10px', borderRadius: '6px', fontSize: '10px',
-                  background: 'var(--surface2)', color: 'var(--text2)', border: 'none', cursor: 'pointer',
-                }}>清除</button>
-              </div>
-            </ParamRow>
-
             {/* Reset defaults */}
             <button onClick={() => {
               setPresetSize('230x230'); setFps(14); setQuality(75); setSpeed('ultrafast');
-              setTrimStart(''); setTrimEnd(''); setCustomW(230); setCustomH(230);
+              setCustomW(230); setCustomH(230);
               setShowOptions(false);
             }} style={{
               padding: '6px 16px', borderRadius: '8px', fontSize: '12px',
@@ -525,74 +628,98 @@ export default function ToWebp() {
                 <div key={item.id} style={{
                   padding: '16px', borderRadius: '12px',
                   border: '1px solid var(--border)', background: 'var(--surface)',
-                  display: 'flex', gap: '12px', alignItems: 'flex-start',
                 }}>
-                  {/* Preview */}
-                  {item.status === 'done' && item.resultUrl ? (
-                    <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#111', flexShrink: 0 }}>
-                      <img src={item.resultUrl} alt="result" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                    </div>
-                  ) : (
-                    <div style={{ width: '80px', height: '80px', borderRadius: '8px', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <span style={{ fontSize: '24px' }}>🎬</span>
-                    </div>
-                  )}
-
-                  {/* Info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {item.file.name}
-                    </div>
-                    <div style={{ fontSize: '10px', color: 'var(--text2)', marginBottom: '6px' }}>
-                      {formatSize(item.file.size)} · {outputFmt.toUpperCase()} · {presetSize === 'custom' ? `${customW}×${customH}` : presetSize} · {fps}fps
-                    </div>
-
-                    {/* Status */}
-                    {item.status === 'waiting' && (
-                      <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>等待转换</span>
-                    )}
-                    {item.status === 'converting' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '12px', height: '12px', border: '1.5px solid rgba(59,130,246,0.3)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', display: 'inline-block' }} />
-                        <span style={{ fontSize: '10px', color: '#60a5fa' }}>转换中 {item.progress}%</span>
+                  {/* Top row: preview + info + actions */}
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                    {/* Preview */}
+                    {item.status === 'done' && item.resultUrl ? (
+                      <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#111', flexShrink: 0 }}>
+                        <img src={item.resultUrl} alt="result" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                       </div>
-                    )}
-                    {item.status === 'done' && (
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}>✓ 完成</span>
-                        {item.resultBlob && (
-                          <span style={{ fontSize: '10px', color: 'var(--text2)' }}>{formatSize(item.resultBlob.size)}</span>
+                    ) : (
+                      <div style={{ width: '80px', height: '80px', borderRadius: '8px', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {item.status === 'loading' ? (
+                          <span style={{ width: '24px', height: '24px', border: '2px solid rgba(59,130,246,0.3)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', display: 'inline-block' }} />
+                        ) : (
+                          <span style={{ fontSize: '24px' }}>🎬</span>
                         )}
                       </div>
                     )}
-                    {item.status === 'error' && (
-                      <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
-                        ✗ {item.error || '转换失败'}
-                      </span>
-                    )}
 
-                    {/* Progress bar */}
-                    {item.status === 'converting' && (
-                      <div style={{ width: '100%', height: '3px', borderRadius: '2px', background: 'var(--surface2)', marginTop: '6px' }}>
-                        <div style={{ height: '3px', borderRadius: '2px', background: 'var(--accent)', width: `${item.progress}%`, transition: 'width 0.3s' }} />
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {item.file.name}
                       </div>
-                    )}
+                      <div style={{ fontSize: '10px', color: 'var(--text2)', marginBottom: '6px' }}>
+                        {formatSize(item.file.size)} · {outputFmt.toUpperCase()} · {presetSize === 'custom' ? `${customW}×${customH}` : presetSize} · {fps}fps
+                        {item.duration > 0 && ` · ${formatDisplayTime(item.duration)}`}
+                      </div>
+
+                      {/* Status */}
+                      {item.status === 'loading' && (
+                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>加载视频信息...</span>
+                      )}
+                      {item.status === 'waiting' && (
+                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(234,179,8,0.15)', color: '#facc15' }}>等待转换</span>
+                      )}
+                      {item.status === 'converting' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ width: '12px', height: '12px', border: '1.5px solid rgba(59,130,246,0.3)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', display: 'inline-block' }} />
+                          <span style={{ fontSize: '10px', color: '#60a5fa' }}>转换中 {item.progress}%</span>
+                        </div>
+                      )}
+                      {item.status === 'done' && (
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}>✓ 完成</span>
+                          {item.resultBlob && (
+                            <span style={{ fontSize: '10px', color: 'var(--text2)' }}>{formatSize(item.resultBlob.size)}</span>
+                          )}
+                        </div>
+                      )}
+                      {item.status === 'error' && (
+                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
+                          ✗ {item.error || '转换失败'}
+                        </span>
+                      )}
+
+                      {/* Progress bar */}
+                      {item.status === 'converting' && (
+                        <div style={{ width: '100%', height: '3px', borderRadius: '2px', background: 'var(--surface2)', marginTop: '6px' }}>
+                          <div style={{ height: '3px', borderRadius: '2px', background: 'var(--accent)', width: `${item.progress}%`, transition: 'width 0.3s' }} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                      {item.status === 'done' && (
+                        <button onClick={() => downloadResult(item)} style={{
+                          padding: '5px 10px', borderRadius: '6px', fontSize: '10px',
+                          background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer',
+                          fontWeight: 600,
+                        }}>↓ 下载</button>
+                      )}
+                      <button onClick={() => removeItem(item.id)} style={{
+                        padding: '5px 8px', borderRadius: '6px', fontSize: '10px',
+                        background: 'var(--surface2)', color: 'var(--text2)', border: 'none', cursor: 'pointer',
+                      }}>×</button>
+                    </div>
                   </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    {item.status === 'done' && (
-                      <button onClick={() => downloadResult(item)} style={{
-                        padding: '5px 10px', borderRadius: '6px', fontSize: '10px',
-                        background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer',
-                        fontWeight: 600,
-                      }}>↓ 下载</button>
-                    )}
-                    <button onClick={() => removeItem(item.id)} style={{
-                      padding: '5px 8px', borderRadius: '6px', fontSize: '10px',
-                      background: 'var(--surface2)', color: 'var(--text2)', border: 'none', cursor: 'pointer',
-                    }}>×</button>
-                  </div>
+                  {/* Trim track (only show for waiting items with metadata loaded) */}
+                  {item.status === 'waiting' && item.duration > 0 && item.thumbnails.length > 0 && (
+                    <div style={{ marginTop: '12px' }}>
+                      <VideoTrimTrack
+                        file={item.file}
+                        duration={item.duration}
+                        trimStart={item.trimStart}
+                        trimEnd={item.trimEnd}
+                        thumbnails={item.thumbnails}
+                        onTrimChange={(start, end) => handleTrimChange(item.id, start, end)}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -610,7 +737,8 @@ export default function ToWebp() {
             <p>• 默认输出：230×230 分辨率、14fps 帧率、品质 75</p>
             <p>• 支持输入格式：MP4、WebM、MOV、AVI、MKV、FLV、3GP、TS 等</p>
             <p>• 输出格式：WebP 动图（推荐，体积小画质好）或 GIF 动图</p>
-            <p>• 可自定义尺寸、帧率、品质、编码速度、剪辑片段</p>
+            <p>• 可自定义尺寸、帧率、品质、编码速度</p>
+            <p>• 添加视频后可拖拽选取片段范围，类似苹果相册裁剪</p>
             <p>• 首次使用需加载约 30MB 的 FFmpeg 核心文件，后续浏览器缓存</p>
           </div>
         </div>
